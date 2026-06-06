@@ -1,17 +1,10 @@
-const Service = require('../models/Service');
-const MenuDraft = require('../models/MenuDraft');
+const { Service, MenuDraft, MenuDraftItem, User } = require('../models');
+const { Op } = require('sequelize');
 
 const MENU_CATEGORIES = ['appetizers', 'mains', 'desserts', 'beverages'];
 const CATEGORY_ALIASES = {
-  appetizer: 'appetizers',
-  appetizers: 'appetizers',
-  main: 'mains',
-  mains: 'mains',
-  dessert: 'desserts',
-  desserts: 'desserts',
-  beverage: 'beverages',
-  beverages: 'beverages',
-  order: 'order'
+  appetizer: 'appetizers', appetizers: 'appetizers', main: 'mains', mains: 'mains',
+  dessert: 'desserts', desserts: 'desserts', beverage: 'beverages', beverages: 'beverages', order: 'order',
 };
 
 const normalizeCategory = (value) => {
@@ -20,36 +13,34 @@ const normalizeCategory = (value) => {
   return CATEGORY_ALIASES[normalized] || normalized;
 };
 
-const getUserId = (req) => req.user?._id || req.user?.id;
+const getUserId = (req) => req.user?.id;
 
 const normalizeDraftItems = (items = []) => {
   if (!Array.isArray(items)) return [];
-
   return items.map((item) => ({
-    id: String(item.id),
     name: item.name,
     price: Number(item.price || 0),
     quantity: Math.max(1, Number(item.quantity || 1)),
     category: item.category || 'appetizers',
-    description: item.description || ''
+    description: item.description || '',
   }));
 };
 
-const normalizeOrderItems = (items = []) => {
-  if (!Array.isArray(items)) return [];
+const menuFilter = (req) => {
+  const filter = { serviceType: 'catering', category: { [Op.in]: MENU_CATEGORIES } };
+  if (req.user?.role === 'vendor') filter.vendorId = getUserId(req);
+  return filter;
+};
 
-  return items.map((item) => ({
-    name: item.name,
-    price: Number(item.price || 0),
-    quantity: Math.max(1, Number(item.quantity || 1)),
-    category: item.category || 'appetizers'
-  }));
+const orderFilter = (req) => {
+  const filter = { serviceType: 'catering', category: 'order' };
+  if (req.user?.role === 'vendor') filter.vendorId = getUserId(req);
+  return filter;
 };
 
 const buildMenuPayload = (body, userId) => {
   const normalizedCategory = normalizeCategory(body.category);
   const category = MENU_CATEGORIES.includes(normalizedCategory) ? normalizedCategory : MENU_CATEGORIES[0];
-
   return {
     ...body,
     serviceType: 'catering',
@@ -60,49 +51,21 @@ const buildMenuPayload = (body, userId) => {
     basePrice: Number(body.basePrice ?? body.price ?? 0),
     vendorId: userId,
     images: Array.isArray(body.images) ? body.images : body.images || [],
-    amenities: Array.isArray(body.amenities) ? body.amenities : body.amenities || []
+    amenities: Array.isArray(body.amenities) ? body.amenities : body.amenities || [],
   };
 };
 
-const menuFilter = (req) => {
-  const filter = {
-    serviceType: 'catering',
-    category: { $in: MENU_CATEGORIES }
-  };
-
-  if (req.user?.role === 'vendor') {
-    filter.vendorId = getUserId(req);
-  }
-
-  return filter;
-};
-
-const orderFilter = (req) => {
-  const filter = {
-    serviceType: 'catering',
-    category: 'order'
-  };
-
-  if (req.user?.role === 'vendor') {
-    filter.vendorId = getUserId(req);
-  }
-
-  return filter;
-};
-
-// Get all catering menu items
 const getCateringMenu = async (req, res) => {
   try {
-    const services = await Service.find(menuFilter(req))
-      .populate('vendorId', 'name email phone')
-      .sort({ createdAt: -1 });
+    const services = await Service.findAll({
+      where: menuFilter(req),
+      include: [{ model: User, as: 'vendor', attributes: ['name', 'email', 'phone'] }],
+      order: [['createdAt', 'DESC']],
+    });
 
     res.json({
       success: true,
-      data: services.map((service) => ({
-        ...service.toObject(),
-        category: normalizeCategory(service.category)
-      }))
+      data: services.map((s) => ({ ...s.toJSON(), category: normalizeCategory(s.category) })),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -113,17 +76,8 @@ const createCateringMenuItem = async (req, res) => {
   try {
     const userId = getUserId(req);
     const payload = buildMenuPayload(req.body, userId);
-
-    const item = new Service(payload);
-    await item.save();
-
-    res.status(201).json({
-      success: true,
-      data: {
-        ...item.toObject(),
-        category: normalizeCategory(item.category)
-      }
-    });
+    const item = await Service.create(payload);
+    res.status(201).json({ success: true, data: { ...item.toJSON(), category: normalizeCategory(item.category) } });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -132,29 +86,16 @@ const createCateringMenuItem = async (req, res) => {
 const updateCateringMenuItem = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const filter = { _id: req.params.id, serviceType: 'catering', category: { $in: MENU_CATEGORIES } };
-
-    if (req.user?.role === 'vendor') {
-      filter.vendorId = userId;
-    }
+    const where = { id: req.params.id, serviceType: 'catering', category: { [Op.in]: MENU_CATEGORIES } };
+    if (req.user?.role === 'vendor') where.vendorId = userId;
 
     const updateData = buildMenuPayload(req.body, userId);
-    const item = await Service.findOneAndUpdate(filter, updateData, {
-      new: true,
-      runValidators: true
-    });
+    const [updated] = await Service.update(updateData, { where });
 
-    if (!item) {
-      return res.status(404).json({ success: false, message: 'Menu item not found' });
-    }
+    if (!updated) return res.status(404).json({ success: false, message: 'Menu item not found' });
 
-    res.json({
-      success: true,
-      data: {
-        ...item.toObject(),
-        category: normalizeCategory(item.category)
-      }
-    });
+    const item = await Service.findByPk(req.params.id);
+    res.json({ success: true, data: { ...item.toJSON(), category: normalizeCategory(item.category) } });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -162,16 +103,11 @@ const updateCateringMenuItem = async (req, res) => {
 
 const deleteCateringMenuItem = async (req, res) => {
   try {
-    const filter = { _id: req.params.id, serviceType: 'catering', category: { $in: MENU_CATEGORIES } };
+    const where = { id: req.params.id, serviceType: 'catering', category: { [Op.in]: MENU_CATEGORIES } };
+    if (req.user?.role === 'vendor') where.vendorId = getUserId(req);
 
-    if (req.user?.role === 'vendor') {
-      filter.vendorId = getUserId(req);
-    }
-
-    const item = await Service.findOne(filter);
-    if (!item) {
-      return res.status(404).json({ success: false, message: 'Menu item not found' });
-    }
+    const item = await Service.findOne({ where });
+    if (!item) return res.status(404).json({ success: false, message: 'Menu item not found' });
 
     await item.softDelete();
     res.json({ success: true, message: 'Menu item deleted successfully' });
@@ -180,27 +116,23 @@ const deleteCateringMenuItem = async (req, res) => {
   }
 };
 
-// Get all catering orders
 const getCateringOrders = async (req, res) => {
   try {
-    const orders = await Service.find(orderFilter(req))
-      .populate('vendorId', 'name email phone')
-      .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      data: orders
+    const orders = await Service.findAll({
+      where: orderFilter(req),
+      include: [{ model: User, as: 'vendor', attributes: ['name', 'email', 'phone'] }],
+      order: [['createdAt', 'DESC']],
     });
+    res.json({ success: true, data: orders });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Create catering order
 const createCateringOrder = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const order = new Service({
+    const order = await Service.create({
       ...req.body,
       name: req.body.name || req.body.eventName || 'Catering Order',
       serviceType: 'catering',
@@ -209,128 +141,78 @@ const createCateringOrder = async (req, res) => {
       city: req.body.city || 'Other',
       status: req.body.status || 'Pending',
       eventDate: req.body.eventDate || new Date(),
-      items: normalizeOrderItems(req.body.items || req.body.menuItems || []),
-      qualityCheck: req.body.qualityCheck || undefined
     });
-
-    await order.save();
-
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Update catering order
 const updateCateringOrder = async (req, res) => {
   try {
-    const query = {
-      _id: req.params.id,
-      serviceType: 'catering',
-      category: 'order'
-    };
+    const where = { id: req.params.id, serviceType: 'catering', category: 'order' };
+    if (req.user.role === 'vendor') where.vendorId = getUserId(req);
 
-    if (req.user.role === 'vendor') {
-      query.vendorId = getUserId(req);
-    }
+    const [updated] = await Service.update(req.body, { where });
+    if (!updated) return res.status(404).json({ success: false, message: 'Order not found' });
 
-    const order = await Service.findOneAndUpdate(query, req.body, {
-      new: true,
-      runValidators: true
-    });
-
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
-    }
-
+    const order = await Service.findByPk(req.params.id);
     res.json({ success: true, data: order });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Update quality check for a catering order
 const updateQualityCheck = async (req, res) => {
   try {
     const { appearance, taste, temperature, plating, notes } = req.body;
+    const where = { id: req.params.id, serviceType: 'catering', category: 'order' };
+    if (req.user.role === 'vendor') where.vendorId = getUserId(req);
 
-    const query = {
-      _id: req.params.id,
-      serviceType: 'catering',
-      category: 'order'
-    };
-
-    // Vendor can only update their own orders
-    if (req.user.role === 'vendor') {
-      query.vendorId = getUserId(req);
-    }
-
-    const order = await Service.findOneAndUpdate(
-      query,
+    const [updated] = await Service.update(
       {
-        $set: {
-          qualityCheck: {
-            appearance,
-            taste,
-            temperature,
-            plating,
-            notes,
-            updatedAt: new Date(),
-            updatedBy: getUserId(req)
-          },
-          status: req.body.status || 'Inspected'
-        }
+        qualityCheck: JSON.stringify({
+          appearance, taste, temperature, plating, notes,
+          updatedAt: new Date(),
+          updatedBy: getUserId(req),
+        }),
+        status: req.body.status || 'Inspected',
       },
-      { new: true, runValidators: true }
+      { where }
     );
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Catering order not found or you do not have permission to update it.'
-      });
-    }
+    if (!updated) return res.status(404).json({ success: false, message: 'Catering order not found or no permission.' });
 
-    res.json({
-      success: true,
-      message: 'Quality check saved successfully',
-      data: order
-    });
+    const order = await Service.findByPk(req.params.id);
+    res.json({ success: true, message: 'Quality check saved successfully', data: order });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Get the current user's saved menu draft
 const getMenuDraft = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Authentication required' });
-    }
+    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
 
     const bookingId = req.query.bookingId || null;
-    const query = {
-      userId: getUserId(req),
-      bookingId
-    };
+    const where = { userId: getUserId(req) };
+    if (bookingId) where.bookingId = bookingId;
 
-    const draft = await MenuDraft.findOne(query).sort({ updatedAt: -1 });
-
-    res.json({
-      success: true,
-      data: draft || null
+    const draft = await MenuDraft.findOne({
+      where,
+      include: [{ model: MenuDraftItem, as: 'items' }],
+      order: [['updatedAt', 'DESC']],
     });
+
+    res.json({ success: true, data: draft || null });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Save the current user's menu draft
 const saveMenuDraft = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Authentication required' });
-    }
+    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
 
     const userId = getUserId(req);
     const bookingId = req.body.bookingId || null;
@@ -340,43 +222,29 @@ const saveMenuDraft = async (req, res) => {
       req.body.totalPrice ?? items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0)
     );
 
-    const draft = await MenuDraft.findOneAndUpdate(
-      { userId, bookingId },
-      {
-        userId,
-        bookingId,
-        guestCount,
-        items,
-        totalPrice,
-        status: 'saved'
-      },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-        setDefaultsOnInsert: true
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'Menu draft saved successfully',
-      data: draft
+    const [draft, created] = await MenuDraft.upsert({
+      userId,
+      bookingId,
+      guestCount,
+      totalPrice,
+      status: 'saved',
     });
+
+    if (items.length > 0) {
+      await MenuDraftItem.destroy({ where: { menuDraftId: draft.id } });
+      await MenuDraftItem.bulkCreate(
+        items.map(item => ({ ...item, menuDraftId: draft.id }))
+      );
+    }
+
+    res.json({ success: true, message: 'Menu draft saved successfully', data: draft });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
 module.exports = {
-  getCateringMenu,
-  createCateringMenuItem,
-  updateCateringMenuItem,
-  deleteCateringMenuItem,
-  getCateringOrders,
-  createCateringOrder,
-  updateCateringOrder,
-  updateQualityCheck,
-  getMenuDraft,
-  saveMenuDraft
+  getCateringMenu, createCateringMenuItem, updateCateringMenuItem, deleteCateringMenuItem,
+  getCateringOrders, createCateringOrder, updateCateringOrder, updateQualityCheck,
+  getMenuDraft, saveMenuDraft,
 };

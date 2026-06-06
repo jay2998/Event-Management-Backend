@@ -1,4 +1,4 @@
-const Notification = require('../models/Notification');
+const { Notification } = require('../models');
 
 exports.getNotifications = async (req, res) => {
   try {
@@ -6,9 +6,12 @@ exports.getNotifications = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const notifications = await Notification.find({ user: req.user.id })
-      .sort({ createdAt: -1 })
-      .limit(20);
+    const notifications = await Notification.findAll({
+      where: { userId: req.user.id },
+      order: [['createdAt', 'DESC']],
+      limit: 20,
+    });
+
     res.json({ success: true, data: notifications });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -21,7 +24,10 @@ exports.markAllRead = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    await Notification.updateMany({ user: req.user.id, read: false }, { read: true });
+    await Notification.update({ read: true }, {
+      where: { userId: req.user.id, read: false },
+    });
+
     res.json({ success: true, message: 'All notifications marked as read' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

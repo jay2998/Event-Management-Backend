@@ -1,71 +1,75 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/db');
 const bcrypt = require('bcryptjs');
-const softDeletePlugin = require('../middlewares/softDelete');
 
-const userSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-    },
-    password: {
-      type: String,
-      required: true,
-    },
-    phone: {
-      type: String,
-      validate: {
-        validator: function (v) {
-          if (v == null || v === '') return true; // optional
-          const re = /^(\+92\d{10}|03\d{9})$/;
-          return re.test(String(v));
-        },
-        message: 'Please provide a valid Pakistani phone number (+92... or 03...)',
-      },
-    },
-    role: {
-      type: String,
-      enum: ['customer', 'vendor', 'admin', 'supervisor'],
-      default: 'customer',
-    },
-    avatar: String,
-    isActive: {
-      type: Boolean,
-      default: true,
+const User = sequelize.define('User', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+    set(value) {
+      this.setDataValue('email', value.toLowerCase().trim());
     },
   },
-  {
-    timestamps: true,
-  }
-);
-
-userSchema.index({ role: 1 });
-
-userSchema.plugin(softDeletePlugin);
-
-
-// Hash password before saving (skip if already hashed)
-userSchema.pre('save', async function() {
-  if (!this.isModified('password')) {
-    return;
-  }
-  if (this.password && this.password.startsWith('$2a$')) {
-    return;
-  }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+  password: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  phone: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  role: {
+    type: DataTypes.ENUM('customer', 'vendor', 'admin', 'supervisor'),
+    defaultValue: 'customer',
+  },
+  avatar: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+  },
+  isDeleted: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+}, {
+  tableName: 'users',
+  timestamps: true,
+  defaultScope: {
+    where: { isDeleted: false },
+  },
+  scopes: {
+    withDeleted: { where: {} },
+  },
+  hooks: {
+    beforeSave: async (user) => {
+      if (user.changed('password') && user.password && !user.password.startsWith('$2a$')) {
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(user.password, salt);
+      }
+    },
+  },
 });
 
-// Compare password method
-userSchema.methods.comparePassword = async function(candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
+User.prototype.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
-module.exports = mongoose.model('User', userSchema);
+User.prototype.softDelete = async function () {
+  this.isDeleted = true;
+  await this.save();
+};
 
+module.exports = User;

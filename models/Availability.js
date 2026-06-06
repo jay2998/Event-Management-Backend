@@ -1,61 +1,59 @@
-const mongoose = require('mongoose');
-const softDeletePlugin = require('../middlewares/softDelete');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/db');
 
-/**
- * Availability blocks reserved time slots to prevent double-booking.
- *
- * resourceType: 'Hall' | 'Vehicle'
- * resourceId: ObjectId of the Hall/Vehicle document
- */
-const availabilitySchema = new mongoose.Schema(
-  {
-    resourceType: {
-      type: String,
-      required: true,
-      enum: ['Hall', 'Vehicle'],
-    },
-    resourceId: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      index: true,
-    },
-    // Date for this reservation
-    date: {
-      type: Date,
-      required: true,
-      index: true,
-    },
-
-    slotStartTime: {
-      type: String,
-      required: true,
-      // HH:mm
-    },
-    slotEndTime: {
-      type: String,
-      required: true,
-      // HH:mm
-    },
-    // Why is it blocked (booking reference if available)
-    bookingId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Booking',
-    },
-    status: {
-      type: String,
-      required: true,
-      enum: ['blocked', 'released'],
-      default: 'blocked',
-      index: true,
-    },
+const Availability = sequelize.define('Availability', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
   },
-  { timestamps: true }
-);
+  resourceType: {
+    type: DataTypes.ENUM('Hall', 'Vehicle'),
+    allowNull: false,
+  },
+  resourceId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
+  date: {
+    type: DataTypes.DATEONLY,
+    allowNull: false,
+  },
+  slotStartTime: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  slotEndTime: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  bookingId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'bookings', key: 'id' },
+  },
+  status: {
+    type: DataTypes.ENUM('blocked', 'released'),
+    defaultValue: 'blocked',
+  },
+  isDeleted: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+}, {
+  tableName: 'availability',
+  timestamps: true,
+  defaultScope: {
+    where: { isDeleted: false },
+  },
+  scopes: {
+    withDeleted: { where: {} },
+  },
+});
 
-availabilitySchema.index({ resourceType: 1, resourceId: 1, date: 1, status: 1 });
-availabilitySchema.plugin(softDeletePlugin);
+Availability.prototype.softDelete = async function () {
+  this.isDeleted = true;
+  await this.save();
+};
 
-module.exports = mongoose.model('Availability', availabilitySchema);
-
-
-
+module.exports = Availability;

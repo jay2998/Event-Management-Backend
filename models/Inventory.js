@@ -1,54 +1,64 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/db');
 
-const inventorySchema = new mongoose.Schema({
+const Inventory = sequelize.define('Inventory', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
   name: {
-    type: String,
-    required: true
+    type: DataTypes.STRING,
+    allowNull: false,
   },
   category: {
-    type: String,
-    enum: ['furniture', 'equipment', 'decor', 'lighting', 'audio', 'tableware'],
-    required: true
+    type: DataTypes.ENUM('furniture', 'equipment', 'decor', 'lighting', 'audio', 'tableware'),
+    allowNull: false,
   },
   city: {
-    type: String,
-    required: true
+    type: DataTypes.STRING,
+    allowNull: false,
   },
   quantity: {
-    type: Number,
-    required: true,
-    default: 0
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
   },
   available: {
-    type: Number,
-    required: true,
-    default: 0
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
   },
   reserved: {
-    type: Number,
-    default: 0
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
   },
   damaged: {
-    type: Number,
-    default: 0
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
   },
   condition: {
-    type: String,
-    enum: ['new', 'good', 'fair', 'poor'],
-    default: 'good'
+    type: DataTypes.ENUM('new', 'good', 'fair', 'poor'),
+    defaultValue: 'good',
   },
   pricePerUnit: {
-    type: Number,
-    required: true
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
   },
-  image: String,
-  description: String,
+  image: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
   vendorId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'users', key: 'id' },
+  },
 }, {
-  timestamps: true
+  tableName: 'inventory',
+  timestamps: true,
 });
 
-module.exports = mongoose.model('Inventory', inventorySchema);
+module.exports = Inventory;

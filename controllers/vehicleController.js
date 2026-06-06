@@ -1,50 +1,41 @@
-const Vehicle = require('../models/Vehicle');
+const { Service } = require('../models');
+const { Op } = require('sequelize');
 
-// Get all vehicles
 const getVehicles = async (req, res) => {
   try {
     const { type, isAvailable, page = 1, limit = 20 } = req.query;
+    const where = { serviceType: 'vehicle' };
 
-    const query = {};
-
-    // Strict multi-tenancy: vendors only see their own records
     if (req.user?.role === 'vendor') {
-      query.vendorId = req.user._id || req.user.id;
+      where.vendorId = req.user.id;
     }
 
-    if (type) {
-      query.type = type;
-    }
+    if (type) where.vehicleType = type;
+    if (isAvailable !== undefined) where.isAvailable = isAvailable === 'true';
 
-    if (isAvailable !== undefined) {
-      query.isAvailable = isAvailable === 'true';
-    }
-
-    const vehicles = await Vehicle.find(query)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
-    const total = await Vehicle.countDocuments(query);
+    const { rows: vehicles, count: total } = await Service.findAndCountAll({
+      where,
+      order: [['createdAt', 'DESC']],
+      offset: (page - 1) * limit,
+      limit: Number(limit),
+    });
 
     res.json({
       success: true,
       data: vehicles,
-      pagination: {
-        total,
-        page: Number(page),
-        pages: Math.ceil(total / limit)
-      }
+      pagination: { total, page: Number(page), pages: Math.ceil(total / limit) },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get single vehicle
 const getVehicle = async (req, res) => {
   try {
-    const filter = req.user?.role === 'vendor' ? { _id: req.params.id, vendorId: req.user._id || req.user.id } : { _id: req.params.id };
-    const vehicle = await Vehicle.findOne(filter);
+    const where = { id: req.params.id, serviceType: 'vehicle' };
+    if (req.user?.role === 'vendor') where.vendorId = req.user.id;
+
+    const vehicle = await Service.findOne({ where });
 
     if (!vehicle) {
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
@@ -56,44 +47,36 @@ const getVehicle = async (req, res) => {
   }
 };
 
-// Create vehicle (vendor only)
 const createVehicle = async (req, res) => {
   try {
-    const userId = req.user?._id || req.user?.id;
+    const userId = req.user?.id;
     const imagePaths = req.files ? req.files.map(file => `/uploads/vehicles/${file.filename}`) : [];
-    
+
     const payload = {
       ...req.body,
+      serviceType: 'vehicle',
       images: imagePaths,
-      // Strict multi-tenancy: vendor assigns itself
-      ...(req.user?.role === 'vendor' ? { vendorId: userId } : { vendorId: req.body.vendorId || userId })
+      vendorId: req.user?.role === 'vendor' ? userId : (req.body.vendorId || userId),
     };
 
-    // Ensure features is an array if sent as a comma-separated string via FormData
     if (typeof payload.features === 'string') {
       payload.features = payload.features.split(',').map(f => f.trim()).filter(f => f);
     }
 
-    const vehicle = new Vehicle(payload);
-    
-    await vehicle.save();
-    
+    const vehicle = await Service.create(payload);
     res.status(201).json({ success: true, data: vehicle });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Update vehicle
 const updateVehicle = async (req, res) => {
   try {
-    const filter = req.user?.role === 'vendor' ? { _id: req.params.id, vendorId: req.user._id || req.user.id } : { _id: req.params.id };
-    
+    const where = { id: req.params.id, serviceType: 'vehicle' };
+    if (req.user?.role === 'vendor') where.vendorId = req.user.id;
+
     const updateData = { ...req.body };
-    
-    // If multer processed the 'images' field (i.e., req.files is defined),
-    // then update the images array. If req.files is an empty array (no new files uploaded),
-    // this will explicitly set the vehicle's images to an empty array, effectively clearing them.
+
     if (req.files) {
       updateData.images = req.files.map(file => `/uploads/vehicles/${file.filename}`);
     }
@@ -102,78 +85,70 @@ const updateVehicle = async (req, res) => {
       updateData.features = updateData.features.split(',').map(f => f.trim()).filter(f => f);
     }
 
-    const vehicle = await Vehicle.findOneAndUpdate(
-      filter,
-      updateData,
-      { new: true, runValidators: true }
-    );
-    if (!vehicle) {
+    const [updated] = await Service.update(updateData, { where });
+
+    if (!updated) {
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
     }
 
+    const vehicle = await Service.findByPk(req.params.id);
     res.json({ success: true, data: vehicle });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Delete vehicle
 const deleteVehicle = async (req, res) => {
   try {
-    const filter = req.user?.role === 'vendor' ? { _id: req.params.id, vendorId: req.user._id || req.user.id } : { _id: req.params.id };
-    const vehicle = await Vehicle.findOne(filter);
+    const where = { id: req.params.id, serviceType: 'vehicle' };
+    if (req.user?.role === 'vendor') where.vendorId = req.user.id;
 
+    const vehicle = await Service.findOne({ where });
     if (!vehicle) {
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
     }
 
     await vehicle.softDelete();
-
     res.json({ success: true, message: 'Vehicle deleted successfully' });
-
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Update vehicle availability
 const updateAvailability = async (req, res) => {
   try {
     const { isAvailable } = req.body;
+    const where = { id: req.params.id, serviceType: 'vehicle' };
+    if (req.user?.role === 'vendor') where.vendorId = req.user.id;
 
-    const filter = req.user?.role === 'vendor' ? { _id: req.params.id, vendorId: req.user._id || req.user.id } : { _id: req.params.id };
-    const vehicle = await Vehicle.findOneAndUpdate(
-      filter,
-      { isAvailable },
-      { new: true }
-    );
-
-    if (!vehicle) {
+    const [updated] = await Service.update({ isAvailable }, { where });
+    if (!updated) {
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
     }
 
+    const vehicle = await Service.findByPk(req.params.id);
     res.json({ success: true, data: vehicle });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Update vehicle condition
 const updateCondition = async (req, res) => {
   try {
     const { condition } = req.body;
+    const where = { id: req.params.id, serviceType: 'vehicle' };
+    if (req.user?.role === 'vendor') where.vendorId = req.user.id;
 
-    const filter = req.user?.role === 'vendor' ? { _id: req.params.id, vendorId: req.user._id || req.user.id } : { _id: req.params.id };
-    const vehicle = await Vehicle.findOneAndUpdate(
-      filter,
-      { condition, lastServiceDate: new Date() },
-      { new: true }
+    const [updated] = await Service.update(
+      { vehicleCondition: condition, lastServiceDate: new Date() },
+      { where }
     );
 
-    if (!vehicle) {
+    if (!updated) {
       return res.status(404).json({ success: false, message: 'Vehicle not found' });
     }
 
+    const vehicle = await Service.findByPk(req.params.id);
     res.json({ success: true, data: vehicle });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -181,11 +156,6 @@ const updateCondition = async (req, res) => {
 };
 
 module.exports = {
-  getVehicles,
-  getVehicle,
-  createVehicle,
-  updateVehicle,
-  deleteVehicle,
-  updateAvailability,
-  updateCondition
+  getVehicles, getVehicle, createVehicle, updateVehicle,
+  deleteVehicle, updateAvailability, updateCondition,
 };

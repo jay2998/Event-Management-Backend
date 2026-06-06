@@ -1,78 +1,37 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/db');
 
-const menuDraftItemSchema = new mongoose.Schema(
-  {
-    id: {
-      type: String,
-      required: true
-    },
-    name: {
-      type: String,
-      required: true
-    },
-    price: {
-      type: Number,
-      required: true,
-      min: 0
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1
-    },
-    category: {
-      type: String,
-      required: false,
-      trim: true
-    },
-    description: {
-      type: String,
-      required: false,
-      trim: true
-    }
+const MenuDraft = sequelize.define('MenuDraft', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
   },
-  { _id: false }
-);
-
-const menuDraftSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true
-    },
-    bookingId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Booking',
-      required: false,
-      default: null,
-      index: true
-    },
-    guestCount: {
-      type: Number,
-      required: false,
-      default: null
-    },
-    items: {
-      type: [menuDraftItemSchema],
-      default: []
-    },
-    totalPrice: {
-      type: Number,
-      required: false,
-      default: 0,
-      min: 0
-    },
-    status: {
-      type: String,
-      enum: ['draft', 'saved'],
-      default: 'draft'
-    }
+  userId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: 'users', key: 'id' },
   },
-  { timestamps: true }
-);
+  bookingId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'bookings', key: 'id' },
+  },
+  guestCount: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  totalPrice: {
+    type: DataTypes.DECIMAL(12, 2),
+    defaultValue: 0,
+  },
+  status: {
+    type: DataTypes.ENUM('draft', 'saved'),
+    defaultValue: 'draft',
+  },
+}, {
+  tableName: 'menu_drafts',
+  timestamps: true,
+});
 
-menuDraftSchema.index({ userId: 1, bookingId: 1 }, { unique: true, sparse: true });
-
-module.exports = mongoose.model('MenuDraft', menuDraftSchema);
+module.exports = MenuDraft;
