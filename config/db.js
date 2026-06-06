@@ -30,6 +30,16 @@ const connectDB = async () => {
     // Sync all models (creates tables if they don't exist)
     await sequelize.sync({ alter: false });
     console.log('Database tables synchronized');
+
+    // Seed default users if none exist
+    const { User } = require('../models');
+    const count = await User.count();
+    if (count === 0) {
+      await User.create({ name: 'Admin User', email: 'admin@eventpro.com', password: 'admin123', role: 'admin', phone: '+92 300 0000000' });
+      await User.create({ name: 'Vendor User', email: 'vendor@eventpro.com', password: 'vendor123', role: 'vendor', phone: '+92 300 0000001' });
+      await User.create({ name: 'Customer User', email: 'customer@eventpro.com', password: 'customer123', role: 'customer', phone: '+92 300 0000002' });
+      console.log('Default users seeded');
+    }
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exit(1);
