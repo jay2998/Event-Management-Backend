@@ -24,6 +24,11 @@ const Notification = sequelize.define('Notification', {
     type: DataTypes.ENUM('booking', 'system', 'alert'),
     defaultValue: 'system',
   },
+  bookingId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'bookings', key: 'id' },
+  },
 }, {
   tableName: 'notifications',
   timestamps: true,
